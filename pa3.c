@@ -63,8 +63,16 @@ extern unsigned int mapcounts[];
  *   Return true if the translation is cached in the TLB.
  *   Return false otherwise
  */
+unsigned long nr_tlb_entry = 0;
+
 bool lookup_tlb(unsigned int vpn, unsigned int rw, unsigned int *pfn)
 {
+	for(int i = 0; i < nr_tlb_entry; i++){
+		if(tlb[i].vpn == vpn && tlb[i].rw == rw && tlb[i].valid){
+			*pfn = tlb[i].pfn;
+			return true;
+		}
+	}
 	return false;
 }
 
@@ -82,6 +90,21 @@ bool lookup_tlb(unsigned int vpn, unsigned int rw, unsigned int *pfn)
  */
 void insert_tlb(unsigned int vpn, unsigned int rw, unsigned int pfn)
 {
+	bool vpn_already_exist = false;
+	int target_tlb_idx = 0;
+	for(target_tlb_idx = 0; target_tlb_idx < nr_tlb_entry; i++){
+		if(tlb[target_tlb_idx].vpn == vpn){
+			vpn_already_exist = true;
+			nr_tlb_entry--;
+			break;
+		}
+	}
+	
+	nr_tlb_entry++;
+	tlb[target_tlb_idx].valid = true;
+	tlb[target_tlb_idx].vpn = vpn;
+	tlb[target_tlb_idx].rw = rw;
+	tlb[target_tlb_idx].pfn = pfn;
 }
 
 
