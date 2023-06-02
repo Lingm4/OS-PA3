@@ -63,12 +63,18 @@ extern unsigned int mapcounts[];
  *   Return true if the translation is cached in the TLB.
  *   Return false otherwise
  */
-unsigned long nr_tlb_entry = 0;
+long nr_tlb_entry = 0;
 
 bool lookup_tlb(unsigned int vpn, unsigned int rw, unsigned int *pfn)
 {
+	/*
+	for(int i = 0; i < 10; i++)
+		printf("%d%d%d ", tlb[i].valid, tlb[i].vpn, tlb[i].rw);
+	printf("\n");
+	*/
+	
 	for(int i = 0; i < nr_tlb_entry; i++){
-		if(tlb[i].vpn == vpn && tlb[i].rw == rw && tlb[i].valid){
+		if(tlb[i].vpn == vpn && tlb[i].rw & rw == rw && tlb[i].valid){
 			*pfn = tlb[i].pfn;
 			return true;
 		}
@@ -90,11 +96,9 @@ bool lookup_tlb(unsigned int vpn, unsigned int rw, unsigned int *pfn)
  */
 void insert_tlb(unsigned int vpn, unsigned int rw, unsigned int pfn)
 {
-	bool vpn_already_exist = false;
 	int target_tlb_idx = 0;
-	for(target_tlb_idx = 0; target_tlb_idx < nr_tlb_entry; i++){
+	for(target_tlb_idx = 0; target_tlb_idx < nr_tlb_entry; target_tlb_idx++){
 		if(tlb[target_tlb_idx].vpn == vpn){
-			vpn_already_exist = true;
 			nr_tlb_entry--;
 			break;
 		}
@@ -105,6 +109,7 @@ void insert_tlb(unsigned int vpn, unsigned int rw, unsigned int pfn)
 	tlb[target_tlb_idx].vpn = vpn;
 	tlb[target_tlb_idx].rw = rw;
 	tlb[target_tlb_idx].pfn = pfn;
+	
 }
 
 
@@ -126,7 +131,31 @@ void insert_tlb(unsigned int vpn, unsigned int rw, unsigned int pfn)
  */
 unsigned int alloc_page(unsigned int vpn, unsigned int rw)
 {
-	return -1;
+	int pfn = 0;
+	for(pfn = 0; pfn < NR_PAGEFRAMES; pfn++){
+		if(!mapcounts[pfn]) break;
+	}
+	
+	if(pfn < NR_PAGEFRAMES){
+		mapcounts[pfn]++;
+		struct pte *target_pte = NULL;
+		int vpn1 = vpn >> PTES_PER_PAGE_SHIFT;
+		int vpn2 = vpn % (1 << PTES_PER_PAGE_SHIFT);
+		if(ptbr->outer_ptes[vpn1] == NULL){
+			ptbr->outer_ptes[vpn1] = (struct pte_directory *)malloc(sizeof(struct pte_directory));
+			for(int i = 0; i < NR_PTES_PER_PAGE; i++){
+				ptbr->outer_ptes[vpn1]->ptes[i].valid = false;
+			}
+			target_pte = &(ptbr->outer_ptes[vpn1]->ptes[vpn2]);
+		}else{
+			target_pte = &(ptbr->outer_ptes[vpn1]->ptes[vpn2]);
+		}
+		target_pte->valid = true;
+		target_pte->rw = rw;
+		target_pte->pfn = pfn;
+		return pfn;
+	}
+	else return -1;
 }
 
 
@@ -141,6 +170,26 @@ unsigned int alloc_page(unsigned int vpn, unsigned int rw)
  */
 void free_page(unsigned int vpn)
 {
+	int vpn1 = vpn >> PTES_PER_PAGE_SHIFT;
+	int vpn2 = vpn % (1 << PTES_PER_PAGE_SHIFT);
+	struct pte *target_pte = &(ptbr->outer_ptes[vpn1]->ptes[vpn2]);
+	int pfn = target_pte->pfn;
+	mapcounts[pfn]--;
+
+	//modify pagetable
+	target_pte->valid = false;
+	bool is_ptes_empty = true;
+	for(int i = 0; i < NR_PTES_PER_PAGE; i++){
+		if(ptbr->outer_ptes[vpn1]->ptes[i].valid) is_ptes_empty = false;
+	}
+	if(is_ptes_empty) free(ptbr->outer_ptes[vpn1]);
+
+	//modify tlb
+	for(int i = 0; i < nr_tlb_entry; i++){
+		if(tlb[i].vpn == vpn && mapcounts[pfn] == 0){
+			tlb[i].valid = false;
+		}
+	}
 }
 
 
