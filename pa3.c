@@ -235,4 +235,57 @@ bool handle_page_fault(unsigned int vpn, unsigned int rw)
  */
 void switch_process(unsigned int pid)
 {
+	struct process *next_process = NULL;
+	struct process *pos;
+	
+	//find process
+	printf("find process\n");
+	list_for_each_entry(pos, &processes, list){
+		if(pos->pid == pid){
+			next_process = pos;
+			break;
+		}
+	}
+
+	//fork
+	if(!next_process){
+		printf("fork\n");
+		//make new process
+		printf("make new process\n");
+		next_process = (struct process *)malloc(sizeof(struct process));
+		next_process->pid = pid;
+		INIT_LIST_HEAD(&next_process->list);
+
+		//copy pagetable
+		printf("copy pagetable\n");
+		for(int i = 0; i < NR_PTES_PER_PAGE; i++){
+			if(current->pagetable.outer_ptes[i] == NULL)
+				next_process->pagetable.outer_ptes[i] = NULL;
+			else{
+				next_process->pagetable.outer_ptes[i] = (struct pte_directory *)malloc(sizeof(struct pte_directory));
+				for(int j = 0; j < NR_PTES_PER_PAGE; j++)
+					next_process->pagetable.outer_ptes[i]->ptes[j] = current->pagetable.outer_ptes[i]->ptes[j];
+			}
+		}
+
+		//modify mapcounts
+		printf("modify mapcounts\n");
+		struct pagetable *pt = &next_process->pagetable;
+		for(int i = 0; i < NR_PTES_PER_PAGE; i++){
+			
+			if(!pt->outer_ptes[i]) continue;
+			
+			printf("modify mapcounts in outer_ptes[%d]\n", i);
+			for(int j = 0; j < NR_PTES_PER_PAGE; j++){
+				if(pt->outer_ptes[i]->ptes[j].valid)
+					mapcounts[pt->outer_ptes[i]->ptes[j].pfn]++;
+			}
+		}
+	}
+
+	//switch
+	printf("switch\n");
+	list_add_tail(&current->list, &processes);
+	current = next_process;
+	ptbr = &next_process->pagetable;
 }
