@@ -98,7 +98,7 @@ void insert_tlb(unsigned int vpn, unsigned int rw, unsigned int pfn)
 {
 	int target_tlb_idx = 0;
 	for(target_tlb_idx = 0; target_tlb_idx < nr_tlb_entry; target_tlb_idx++){
-		if(tlb[target_tlb_idx].vpn == vpn){
+		if(tlb[target_tlb_idx].valid && tlb[target_tlb_idx].vpn == vpn){
 			nr_tlb_entry--;
 			break;
 		}
@@ -109,7 +109,6 @@ void insert_tlb(unsigned int vpn, unsigned int rw, unsigned int pfn)
 	tlb[target_tlb_idx].vpn = vpn;
 	tlb[target_tlb_idx].rw = rw;
 	tlb[target_tlb_idx].pfn = pfn;
-	
 }
 
 
@@ -153,6 +152,7 @@ unsigned int alloc_page(unsigned int vpn, unsigned int rw)
 		target_pte->valid = true;
 		target_pte->rw = rw;
 		target_pte->pfn = pfn;
+		target_pte->private = 0;
 		return pfn;
 	}
 	else return -1;
@@ -211,6 +211,35 @@ void free_page(unsigned int vpn)
  */
 bool handle_page_fault(unsigned int vpn, unsigned int rw)
 {
+	int vpn1 = vpn >> PTES_PER_PAGE_SHIFT;
+	int vpn2 = vpn % (1 << PTES_PER_PAGE_SHIFT);
+
+	if(!ptbr->outer_ptes[vpn1]){
+		return true;
+	}else if(!ptbr->outer_ptes[vpn1]->ptes[vpn2].valid){
+		return true;
+	}
+	
+	struct pte *pte = &ptbr->outer_ptes[vpn1]->ptes[vpn2];
+	if(!(pte->rw & rw) && pte->private & rw){
+		
+		pte->rw = pte->private;
+		pte->private = 0;
+		
+		if(mapcounts[pte->pfn] > 1){
+			printf("copy on write\n");
+			mapcounts[pte->pfn]--;
+			int pfn = alloc_page(vpn, pte->rw);
+			for(int i = 0; i < NR_TLB_ENTRIES; i++)
+				if(tlb[i].valid && tlb[i].vpn == vpn)
+					tlb[i].pfn = pfn;
+		}
+
+		for(int i = 0; i < NR_TLB_ENTRIES; i++)
+			if(tlb[i].valid && tlb[i].vpn == vpn)
+				tlb[i].rw = rw;
+		return true;
+	}
 	return false;
 }
 
@@ -239,7 +268,7 @@ void switch_process(unsigned int pid)
 	struct process *pos;
 	
 	//find process
-	printf("find process\n");
+	//printf("find process\n");
 	list_for_each_entry(pos, &processes, list){
 		if(pos->pid == pid){
 			next_process = pos;
@@ -249,7 +278,8 @@ void switch_process(unsigned int pid)
 
 	//fork
 	if(!next_process){
-		printf("fork\n");
+		
+		//printf("fork\n");
 		//make new process
 		printf("make new process\n");
 		next_process = (struct process *)malloc(sizeof(struct process));
@@ -257,25 +287,31 @@ void switch_process(unsigned int pid)
 		INIT_LIST_HEAD(&next_process->list);
 
 		//copy pagetable
-		printf("copy pagetable\n");
+		//printf("copy pagetable\n");
 		for(int i = 0; i < NR_PTES_PER_PAGE; i++){
 			if(current->pagetable.outer_ptes[i] == NULL)
 				next_process->pagetable.outer_ptes[i] = NULL;
 			else{
 				next_process->pagetable.outer_ptes[i] = (struct pte_directory *)malloc(sizeof(struct pte_directory));
-				for(int j = 0; j < NR_PTES_PER_PAGE; j++)
+				for(int j = 0; j < NR_PTES_PER_PAGE; j++){
+					//modify rw and backup to private
+					if(current->pagetable.outer_ptes[i]->ptes[j].rw & ACCESS_WRITE){
+						current->pagetable.outer_ptes[i]->ptes[j].private = current->pagetable.outer_ptes[i]->ptes[j].rw;
+						current->pagetable.outer_ptes[i]->ptes[j].rw = ACCESS_READ;
+					}
 					next_process->pagetable.outer_ptes[i]->ptes[j] = current->pagetable.outer_ptes[i]->ptes[j];
+				}
 			}
 		}
 
 		//modify mapcounts
-		printf("modify mapcounts\n");
+		//printf("modify mapcounts\n");
 		struct pagetable *pt = &next_process->pagetable;
 		for(int i = 0; i < NR_PTES_PER_PAGE; i++){
 			
 			if(!pt->outer_ptes[i]) continue;
 			
-			printf("modify mapcounts in outer_ptes[%d]\n", i);
+			//printf("modify mapcounts in outer_ptes[%d]\n", i);
 			for(int j = 0; j < NR_PTES_PER_PAGE; j++){
 				if(pt->outer_ptes[i]->ptes[j].valid)
 					mapcounts[pt->outer_ptes[i]->ptes[j].pfn]++;
@@ -284,8 +320,12 @@ void switch_process(unsigned int pid)
 	}
 
 	//switch
-	printf("switch\n");
+	//printf("switch\n");
 	list_add_tail(&current->list, &processes);
 	current = next_process;
 	ptbr = &next_process->pagetable;
+
+	//flush tlb
+	for(int i = 0; i < NR_TLB_ENTRIES; i++)
+		tlb[i].valid = false;
 }
