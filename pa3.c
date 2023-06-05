@@ -63,7 +63,6 @@ extern unsigned int mapcounts[];
  *   Return true if the translation is cached in the TLB.
  *   Return false otherwise
  */
-long nr_tlb_entry = 0;
 
 bool lookup_tlb(unsigned int vpn, unsigned int rw, unsigned int *pfn)
 {
@@ -73,7 +72,7 @@ bool lookup_tlb(unsigned int vpn, unsigned int rw, unsigned int *pfn)
 	printf("\n");
 	*/
 	
-	for(int i = 0; i < nr_tlb_entry; i++){
+	for(int i = 0; i < NR_TLB_ENTRIES; i++){
 		if(tlb[i].vpn == vpn && tlb[i].rw & rw == rw && tlb[i].valid){
 			*pfn = tlb[i].pfn;
 			return true;
@@ -97,14 +96,14 @@ bool lookup_tlb(unsigned int vpn, unsigned int rw, unsigned int *pfn)
 void insert_tlb(unsigned int vpn, unsigned int rw, unsigned int pfn)
 {
 	int target_tlb_idx = 0;
-	for(target_tlb_idx = 0; target_tlb_idx < nr_tlb_entry; target_tlb_idx++){
-		if(tlb[target_tlb_idx].valid && tlb[target_tlb_idx].vpn == vpn){
-			nr_tlb_entry--;
+	for(target_tlb_idx = 0; tlb[target_tlb_idx].valid; target_tlb_idx++);
+	for(int i = 0; i < NR_TLB_ENTRIES; i++){
+		if(tlb[i].valid && tlb[i].vpn == vpn){
+			target_tlb_idx = i;
 			break;
 		}
 	}
 	
-	nr_tlb_entry++;
 	tlb[target_tlb_idx].valid = true;
 	tlb[target_tlb_idx].vpn = vpn;
 	tlb[target_tlb_idx].rw = rw;
@@ -185,7 +184,7 @@ void free_page(unsigned int vpn)
 	if(is_ptes_empty) free(ptbr->outer_ptes[vpn1]);
 
 	//modify tlb
-	for(int i = 0; i < nr_tlb_entry; i++){
+	for(int i = 0; i < NR_TLB_ENTRIES; i++){
 		if(tlb[i].vpn == vpn && mapcounts[pfn] == 0){
 			tlb[i].valid = false;
 		}
