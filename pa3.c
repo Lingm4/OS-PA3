@@ -185,7 +185,7 @@ void free_page(unsigned int vpn)
 
 	//modify tlb
 	for(int i = 0; i < NR_TLB_ENTRIES; i++){
-		if(tlb[i].vpn == vpn && mapcounts[pfn] == 0){
+		if(tlb[i].vpn == vpn && tlb[i].valid){
 			tlb[i].valid = false;
 		}
 	}
